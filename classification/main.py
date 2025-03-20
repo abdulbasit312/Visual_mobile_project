@@ -23,7 +23,7 @@ from utils import NativeScalerWithGradNormCount as NativeScaler
 import utils as utils
 
 from model import *
-from classification.data.samplers import MultiScaleSamplerDDP
+from data.samplers import MultiScaleSamplerDDP
 
 
 def str2bool(v):
@@ -54,7 +54,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.0)')
-    parser.add_argument('--input_size', default=224, type=int,
+    parser.add_argument('--input_size', default=64, type=int,
                         help='image input size')
     parser.add_argument('--layer_scale_init_value', default=1e-6, type=float,
                         help="Layer scale initial values")
@@ -135,16 +135,16 @@ def get_args_parser():
                         help='dataset path (path to full imagenet)')
     parser.add_argument('--eval_data_path', default=None, type=str,
                         help='dataset path for evaluation')
-    parser.add_argument('--nb_classes', default=1000, type=int,
+    parser.add_argument('--nb_classes', default=200, type=int,
                         help='number of the classification types')
     parser.add_argument('--imagenet_default_mean_and_std', type=str2bool, default=True)
-    parser.add_argument('--data_set', default='IMNET', choices=['IMNET', 'image_folder'],
+    parser.add_argument('--data_set', default='image_folder', choices=['IMNET', 'image_folder'],
                         type=str, help='ImageNet dataset path')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default=None,
                         help='path where to tensorboard log')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=43, type=int)
 

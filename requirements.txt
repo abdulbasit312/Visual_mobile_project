@@ -1,0 +1,6 @@
+torch==1.8.0
+torchvision==0.9.1
+timm==0.5.4
+mmcv-full==1.5.3
+mmdet==2.24
+mmsegmentation==0.24
