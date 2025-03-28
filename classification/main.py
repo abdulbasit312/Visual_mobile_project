@@ -43,7 +43,7 @@ def str2bool(v):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CAS-ViT training and evaluation script for image classification', add_help=False)
-    parser.add_argument('--batch_size', default=256, type=int,
+    parser.add_argument('--batch_size', default=32, type=int,
                         help='Per GPU batch size')
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--update_freq', default=2, type=int,
@@ -54,7 +54,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.0)')
-    parser.add_argument('--input_size', default=64, type=int,
+    parser.add_argument('--input_size', default=224, type=int,
                         help='image input size')
     parser.add_argument('--layer_scale_init_value', default=1e-6, type=float,
                         help="Layer scale initial values")
@@ -144,7 +144,7 @@ def get_args_parser():
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default=None,
                         help='path where to tensorboard log')
-    parser.add_argument('--device', default='cpu',
+    parser.add_argument('--device', default='cuda:0',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=43, type=int)
 
@@ -204,7 +204,8 @@ def get_args_parser():
 
 
 def main(args):
-    utils.init_distributed_mode(args)
+    #utils.init_distributed_mode(args)
+    args.distributed=False
     print(args)
     device = torch.device(args.device)
 
