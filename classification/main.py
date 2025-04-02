@@ -43,7 +43,7 @@ def str2bool(v):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CAS-ViT training and evaluation script for image classification', add_help=False)
-    parser.add_argument('--batch_size', default=32, type=int,
+    parser.add_argument('--batch_size', default=16, type=int,
                         help='Per GPU batch size')
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--update_freq', default=2, type=int,
@@ -99,7 +99,7 @@ def get_args_parser():
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1,
-                        help='Label smoothing (default: 0.1)')
+                        help='Label smoothing (default: 0.1')
     parser.add_argument('--train_interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
 
@@ -177,7 +177,7 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
-    parser.add_argument('--use_amp', type=str2bool, default=True,
+    parser.add_argument('--use_amp', type=str2bool, default=False,
                         help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
 
     # Weights and Biases arguments
@@ -369,7 +369,9 @@ def main(args):
         get_num_layer=assigner.get_layer_id if assigner is not None else None,
         get_layer_scale=assigner.get_scale if assigner is not None else None)
 
-    loss_scaler = NativeScaler()  # if args.use_amp is False, this won't be used
+    loss_scaler=None
+    if args.use_amp:
+        loss_scaler = NativeScaler()  # if args.use_amp is False, this won't be used
 
     print("Use Cosine LR scheduler")
     lr_schedule_values = utils.cosine_scheduler(

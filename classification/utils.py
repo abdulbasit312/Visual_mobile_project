@@ -454,7 +454,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
             'model': model_without_ddp.state_dict(),
             'optimizer': optimizer.state_dict(),
             'epoch': epoch,
-            'scaler': loss_scaler.state_dict(),
+            'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
             'args': args,
         }
 
@@ -489,7 +489,8 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.resume, map_location='cpu', check_hash=True)
         else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
+            
+            checkpoint = torch.load(args.resume, map_location='cpu',weights_only=False)
         model_without_ddp.load_state_dict(checkpoint[state_dict_name])
         print("Resume checkpoint %s" % args.resume)
         if 'optimizer' in checkpoint and 'epoch' in checkpoint:

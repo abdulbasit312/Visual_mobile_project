@@ -11,6 +11,9 @@ from einops import rearrange, repeat
 import itertools
 import os
 import copy
+import torchvision
+import torch.nn.functional as F
+
 
 from timm.models.layers import DropPath, trunc_normal_, to_2tuple
 from timm.models.registry import register_model
@@ -24,6 +27,139 @@ def stem(in_chs, out_chs):
         nn.Conv2d(out_chs // 2, out_chs, kernel_size=3, stride=2, padding=1),
         nn.BatchNorm2d(out_chs),
         nn.ReLU(), )
+
+class MDTA(nn.Module):
+    def __init__(self, channels, num_heads):
+        super(MDTA, self).__init__()
+        self.num_heads = num_heads
+        self.temperature = nn.Parameter(torch.ones(1, num_heads, 1, 1))
+
+        self.kv = nn.Conv2d(channels, channels * 2, kernel_size=1, bias=False)
+        self.kv_conv = DeformableConv2d(channels * 2, channels *2)#nn.Conv2d(channels * 2, channels *2, kernel_size=3, padding=1, groups=channels * 2, bias=False)
+        self.project_out = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
+
+    def forward(self, x, q):
+        b, c, h, w = x.shape
+        k, v = self.kv_conv(self.kv(x)).chunk(2, dim=1)
+
+        q = q.reshape(b, self.num_heads, -1, h * w)
+        k = k.reshape(b, self.num_heads, -1, h * w)
+        v = v.reshape(b, self.num_heads, -1, h * w)
+        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+
+        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) * self.temperature, dim=-1)
+        out = self.project_out(torch.matmul(attn, v).reshape(b, -1, h, w))
+        return out, q
+
+class Nested_MDTA(nn.Module):
+    def __init__(self, channels, num_heads):
+        super(Nested_MDTA, self).__init__()
+        self.pack_attention = MDTA(channels, num_heads)
+        self.unpack_attention = MDTA(channels, num_heads)
+
+    def forward(self,x, p):
+        packed_context, query = self.pack_attention(x, p)
+        unpacked_context, _ = self.unpack_attention(packed_context, query)
+        return unpacked_context, packed_context
+
+class GDFN(nn.Module):
+    def __init__(self, channels, expansion_factor):
+        super(GDFN, self).__init__()
+
+        hidden_channels = int(channels * expansion_factor)
+        self.project_in = nn.Conv2d(channels, hidden_channels * 2, kernel_size=1, bias=False)
+        self.conv = nn.Conv2d(hidden_channels * 2, hidden_channels * 2, kernel_size=3, padding=1,
+                              groups=hidden_channels * 2, bias=False)
+        self.project_out = nn.Conv2d(hidden_channels, channels, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        x1, x2 = self.conv(self.project_in(x)).chunk(2, dim=1)
+        x = self.project_out(F.gelu(x1) * x2)
+        return x
+
+class LunaTransformerEncoderLayer(nn.Module):
+    def __init__(self, channels, num_heads, expansion_factor):
+        super(LunaTransformerEncoderLayer, self).__init__()
+        self.luna_attention = Nested_MDTA(channels, num_heads)
+        self.feed_forward = GDFN(channels, expansion_factor)
+        self.packed_context_layer_norm = nn.LayerNorm(channels)
+        self.unpacked_context_layer_norm = nn.LayerNorm(channels)
+        # self.unpacked_context_layer_norm = nn.LayerNorm(channels)
+        self.feed_forward_layer_norm = nn.LayerNorm(channels)
+
+    def forward(self, x, p):
+        b, c, h, w = x.shape
+        unpacked_context, packed_context = self.luna_attention(x,p)
+
+        packed_context = self.packed_context_layer_norm((packed_context + p).reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1).contiguous().reshape(b, c, h, w)
+
+        unpacked_context = self.unpacked_context_layer_norm((unpacked_context + x).reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1).contiguous().reshape(b, c, h, w)
+
+        outputs = self.feed_forward(unpacked_context)
+
+        outputs = self.feed_forward_layer_norm((outputs + unpacked_context).reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1).contiguous().reshape(b, c, h, w)
+
+        return outputs, packed_context
+    
+class DeformableConv2d(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=3,
+                 stride=1,
+                 padding=1,
+                 bias=False):
+
+        super(DeformableConv2d, self).__init__()
+        
+        assert type(kernel_size) == tuple or type(kernel_size) == int
+
+        kernel_size = kernel_size if type(kernel_size) == tuple else (kernel_size, kernel_size)
+        self.stride = stride if type(stride) == tuple else (stride, stride)
+        self.padding = padding
+        
+        self.offset_conv = nn.Conv2d(in_channels, 
+                                     2 * kernel_size[0] * kernel_size[1],
+                                     kernel_size=kernel_size, 
+                                     stride=stride,
+                                     padding=self.padding, 
+                                     bias=True)
+
+        nn.init.constant_(self.offset_conv.weight, 0.)
+        nn.init.constant_(self.offset_conv.bias, 0.)
+        
+        self.modulator_conv = nn.Conv2d(in_channels, 
+                                     1 * kernel_size[0] * kernel_size[1],
+                                     kernel_size=kernel_size, 
+                                     stride=stride,
+                                     padding=self.padding, 
+                                     bias=True)
+
+        nn.init.constant_(self.modulator_conv.weight, 0.)
+        nn.init.constant_(self.modulator_conv.bias, 0.)
+        
+        self.regular_conv = nn.Conv2d(in_channels=in_channels,
+                                      out_channels=out_channels,
+                                      kernel_size=kernel_size,
+                                      stride=stride,
+                                      padding=self.padding,
+                                      bias=bias)
+
+    def forward(self, x):
+        #h, w = x.shape[2:]
+        #max_offset = max(h, w)/4.
+
+        offset = self.offset_conv(x)#.clamp(-max_offset, max_offset)
+        modulator = 2. * torch.sigmoid(self.modulator_conv(x))
+        
+        x = torchvision.ops.deform_conv2d(input=x, 
+                                          offset=offset, 
+                                          weight=self.regular_conv.weight, 
+                                          bias=self.regular_conv.bias, 
+                                          padding=self.padding,
+                                          stride=self.stride,
+                                          )
+        return x
 
 class Embedding(nn.Module):
     """
@@ -147,18 +283,18 @@ class AdditiveBlock(nn.Module):
         super().__init__()
         self.local_perception = LocalIntegration(dim, ratio=1, act_layer=act_layer, norm_layer=norm_layer)
         self.norm1 = norm_layer(dim)
-        self.attn = AdditiveTokenMixer(dim, attn_bias=attn_bias, proj_drop=drop)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-        self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
+        self.encoder=LunaTransformerEncoderLayer(dim,1,mlp_hidden_dim)
+        self.res_last = nn.Conv2d(dim*2, dim, kernel_size=1, bias=False)
     def forward(self, x):
-        x = x + self.local_perception(x)
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        #x = x + self.local_perception(x)
+        x1,res_x1=self.encoder(x,x)
+        x_cat=torch.cat([x1,res_x1],dim=1)
+        x=self.res_last(x_cat)
+        #x = x + self.drop_path(self.attn(self.norm1(x)))  # remove 
+        #x = x + self.drop_path(self.mlp(self.norm2(x)))     # remove
         return x
 
 def Stage(dim, index, layers, mlp_ratio=4., act_layer=nn.GELU, attn_bias=False, drop=0., drop_path_rate=0.):
@@ -166,11 +302,11 @@ def Stage(dim, index, layers, mlp_ratio=4., act_layer=nn.GELU, attn_bias=False, 
     """
     blocks = []
     for block_idx in range(layers[index]):
-        block_dpr = drop_path_rate * (block_idx + sum(layers[:index])) / (sum(layers) - 1)
+        #block_dpr = drop_path_rate * (block_idx + sum(layers[:index])) / (sum(layers) - 1)
 
         blocks.append(
             AdditiveBlock(
-                dim, mlp_ratio=mlp_ratio, attn_bias=attn_bias, drop=drop, drop_path=block_dpr,
+                dim, mlp_ratio=mlp_ratio, attn_bias=attn_bias, drop=drop, drop_path=0.,
                 act_layer=act_layer, norm_layer=nn.BatchNorm2d)
         )
     blocks = nn.Sequential(*blocks)
@@ -309,7 +445,7 @@ class RCViT(nn.Module):
 @register_model
 def rcvit_xs(**kwargs):
     model = RCViT(
-        layers=[2, 2, 4, 2], embed_dims=[48, 56, 112, 220], mlp_ratios=4, downsamples=[True, True, True, True],
+        layers=[1], embed_dims=[48], mlp_ratios=4, downsamples=[True],
         norm_layer=nn.BatchNorm2d, attn_bias=False, act_layer=nn.GELU, drop_rate=0.,
         fork_feat=False, init_cfg=None, **kwargs)
     return model
@@ -317,7 +453,7 @@ def rcvit_xs(**kwargs):
 @register_model
 def rcvit_s(**kwargs):
     model = RCViT(
-        layers=[3, 3, 6, 3], embed_dims=[48, 64, 128, 256], mlp_ratios=4, downsamples=[True, True, True, True],
+        layers=[1,1], embed_dims=[48, 64], mlp_ratios=4, downsamples=[True, True],
         norm_layer=nn.BatchNorm2d, attn_bias=False, act_layer=nn.GELU, drop_rate=0.,
         fork_feat=False, init_cfg=None, **kwargs)
     return model
