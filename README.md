@@ -8,14 +8,7 @@ The dataset used is IMageNet-200, can be obtained from IMageNet -1K using the da
 
 The dataset format expected is as follows: 
 
-train/
-├── class_1/
-│   ├── img1.png
-│   └── img2.png
-├── class_2/
-│   ├── img1.png
-│   └── img2.png
-
+<pre lang="markdown"> ``` train/ ├── class_1/ │ ├── img1.png │ └── img2.png ├── class_2/ │ ├── img1.png │ └── img2.png ``` </pre>
 
 
 The architecture for NDMA-CAS-ViT is as follows:
