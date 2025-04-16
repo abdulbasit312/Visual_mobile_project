@@ -7,7 +7,7 @@ The conda enviroment can be activated from the environment.yml present
 The dataset used is IMageNet-200, can be obtained from IMageNet -1K using the data_cookbook script, The actual dataset will be uploaded soon as well.
 
 The dataset format expected is as follows: 
-train/ ├── class_1/ │ ├── img1.png │ └── img2.png ├── class_2/ │ ├── img1.png │ └── img2.png
+```train/ ├── class_1/ │ ├── img1.png │ └── img2.png ├── class_2/ │ ├── img1.png │ └── img2.png```
 
 
 The architecture for NDMA-CAS-ViT is as follows:
