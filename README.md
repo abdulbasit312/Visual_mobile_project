@@ -1,4 +1,4 @@
-This repository contains all the expriments for the Visual and Mobile computing project on Efficient ViT: Training and inference.
+This repository contains all the experiments for the Visual and Mobile computing project on Efficient ViT: Training and inference.
 
 The folders correspond to different experiments conducted
 
